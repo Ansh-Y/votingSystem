@@ -1,0 +1,55 @@
+RUNNING THE VOTING SYSTEM APPLICATION
+------------------------------------
+
+I've configured the application to run both frontend and backend on the same system without port conflicts:
+- Frontend (React): Running on port 3000
+- Backend (Node.js): Running on port 5000
+
+Follow these steps to run the application:
+
+1. First, make sure your MySQL database is properly set up:
+   - If you haven't set up the database yet, follow the instructions in database_setup_instructions.txt
+
+2. Start the backend server:
+   ```
+   cd backend
+   npm run dev
+   ```
+   You should see: "Server running on http://localhost:5000"
+
+3. In a new terminal window, start the frontend:
+   ```
+   cd C:\Users\lenovo\voting-system
+   npm start
+   ```
+   This will automatically open http://localhost:3000 in your browser
+
+4. Test the application with these credentials:
+   - Admin: admin@example.com / Admin123
+   - Voter: voter1@example.com / Voter123
+   - Candidate: candidate1@example.com / Candidate123
+
+TROUBLESHOOTING
+--------------
+
+If you encounter errors:
+
+1. Database connection issues:
+   - Check that your MySQL server is running
+   - Verify the database credentials in backend/.env
+   - Make sure the database tables are created properly
+
+2. "Cannot find module" errors:
+   - Run `npm install` in both the root directory and backend directory
+
+3. Port conflicts:
+   - If port 3000 is in use, React will automatically suggest using another port (like 3001)
+   - If port 5000 is in use, you can change it in backend/.env
+
+4. API connection errors:
+   - Make sure both servers are running
+   - Check that src/services/api.js has the correct backend URL (http://localhost:5000/api)
+
+5. Login errors:
+   - Make sure the users table was created with an 'email' column
+   - Verify the test user accounts were inserted correctly 

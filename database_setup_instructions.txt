@@ -1,0 +1,109 @@
+DATABASE SETUP INSTRUCTIONS
+------------------------
+
+Since PowerShell has issues with redirecting SQL files directly to MySQL, please follow these manual steps:
+
+1. Start MySQL Command Line Client:
+   - Open Start Menu and search for "MySQL Command Line Client"
+   - Enter your MySQL root password when prompted
+
+2. In the MySQL client, execute the following commands to create and use the database:
+   ```sql
+   DROP DATABASE IF EXISTS voting_db;
+   CREATE DATABASE voting_db;
+   USE voting_db;
+   ```
+
+3. Now create the users table:
+   ```sql
+   CREATE TABLE users (
+       id INT PRIMARY KEY AUTO_INCREMENT,
+       name VARCHAR(100) NOT NULL,
+       email VARCHAR(100) NOT NULL UNIQUE,
+       password VARCHAR(255) NOT NULL,
+       role ENUM('admin', 'candidate', 'voter') NOT NULL,
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+   );
+   ```
+
+4. Create the polls table:
+   ```sql
+   CREATE TABLE polls (
+       id INT PRIMARY KEY AUTO_INCREMENT,
+       title VARCHAR(255) NOT NULL,
+       description TEXT,
+       start_date DATETIME NOT NULL,
+       end_date DATETIME NOT NULL,
+       status ENUM('pending', 'ongoing', 'ended') DEFAULT 'pending',
+       created_by INT,
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       FOREIGN KEY (created_by) REFERENCES users(id)
+   );
+   ```
+
+5. Create the poll_candidates table:
+   ```sql
+   CREATE TABLE poll_candidates (
+       id INT PRIMARY KEY AUTO_INCREMENT,
+       poll_id INT NOT NULL,
+       candidate_id INT NOT NULL,
+       FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE,
+       FOREIGN KEY (candidate_id) REFERENCES users(id),
+       UNIQUE (poll_id, candidate_id)
+   );
+   ```
+
+6. Create the votes table:
+   ```sql
+   CREATE TABLE votes (
+       id INT PRIMARY KEY AUTO_INCREMENT,
+       poll_id INT NOT NULL,
+       voter_id INT NOT NULL,
+       candidate_id INT NOT NULL,
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+       FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE,
+       FOREIGN KEY (voter_id) REFERENCES users(id),
+       FOREIGN KEY (candidate_id) REFERENCES users(id),
+       UNIQUE (poll_id, voter_id)
+   );
+   ```
+
+7. Insert test users:
+   ```sql
+   -- Add an initial admin user (Password: Admin123)
+   INSERT INTO users (name, email, password, role)
+   VALUES (
+       'Admin User', 
+       'admin@example.com', 
+       '$2a$10$b9yA1qLXBguwO9DFeDRyI.nWv8J6ZeP3BvyKxQ3yAHJQOd.cHN22e',
+       'admin'
+   );
+
+   -- Add some example voters (Password: Voter123)
+   INSERT INTO users (name, email, password, role)
+   VALUES 
+       ('Voter One', 'voter1@example.com', '$2a$10$cCXazKfL6MrBbJaJzN56EejAvj92TxiXpQpVuGFqLJmJWFVKYzZHu', 'voter'),
+       ('Voter Two', 'voter2@example.com', '$2a$10$cCXazKfL6MrBbJaJzN56EejAvj92TxiXpQpVuGFqLJmJWFVKYzZHu', 'voter');
+
+   -- Add some example candidates (Password: Candidate123)
+   INSERT INTO users (name, email, password, role)
+   VALUES
+       ('Candidate One', 'candidate1@example.com', '$2a$10$JbRXw95B.zn1IbBm2X5cK.jcHGaFIorfHxv5MQHUDSgbOGLnvGU/u', 'candidate'),
+       ('Candidate Two', 'candidate2@example.com', '$2a$10$JbRXw95B.zn1IbBm2X5cK.jcHGaFIorfHxv5MQHUDSgbOGLnvGU/u', 'candidate'),
+       ('Candidate Three', 'candidate3@example.com', '$2a$10$JbRXw95B.zn1IbBm2X5cK.jcHGaFIorfHxv5MQHUDSgbOGLnvGU/u', 'candidate');
+   ```
+
+8. Verify tables were created correctly:
+   ```sql
+   SHOW TABLES;
+   DESCRIBE users;  -- Should show email column
+   ```
+
+9. Once all tables are set up correctly, exit MySQL:
+   ```sql
+   EXIT;
+   ```
+
+10. Restart your backend server and the application should now work correctly. 
