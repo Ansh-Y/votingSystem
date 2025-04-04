@@ -1,145 +1,238 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
-import { pollsAPI } from "../services/api";
+import api, { Polls } from "../services/api";
 
 const AdminDashboard = () => {
-  const { currentUser, logout } = useAuth();
-  const [polls, setPolls] = useState([]);
-  const [candidates, setCandidates] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const { user, logout } = useAuth();
+  const [activeTab, setActiveTab] = useState("ongoing");
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [ongoingPolls, setOngoingPolls] = useState([]);
+  const [pastPolls, setPastPolls] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
   
-  // New poll form state
-  const [newPoll, setNewPoll] = useState({
-    title: "",
-    description: "",
-    startDate: "",
-    endDate: "",
-    candidates: []
-  });
+  // Poll form state
+  const [pollTitle, setPollTitle] = useState("");
+  const [pollDescription, setPollDescription] = useState("");
+  const [pollQuestion, setPollQuestion] = useState("");
+  const [pollOptions, setPollOptions] = useState(["", ""]);
 
-  // Fetch polls on component mount
-  useEffect(() => {
-    fetchPolls();
-    fetchCandidates();
-  }, []);
-
-  // Fetch all polls
   const fetchPolls = async () => {
+    setLoading(true);
+    setError(null);
+    console.log("==============================================");
+    console.log("Starting poll fetch (AdminDashboard)");
+    
     try {
-      setLoading(true);
-      const response = await pollsAPI.getOngoingPolls();
-      setPolls(response.data);
+      console.log("Fetching ongoing polls...");
+      const ongoingRes = await Polls.getOngoing();
+      console.log("Ongoing polls received:", ongoingRes);
+      console.log(`Received ${ongoingRes.length} ongoing polls`);
+      
+      const pastRes = await Polls.getPast();
+      console.log("Past polls received:", pastRes);
+      console.log(`Received ${pastRes.length} past polls`);
+      
+      setOngoingPolls(ongoingRes);
+      setPastPolls(pastRes);
+      
+      // Immediately after creating a poll, fetch again to ensure we have the latest data
+      console.log("Polls fetched successfully - ongoing:", ongoingRes.length, "past:", pastRes.length);
     } catch (err) {
       console.error("Error fetching polls:", err);
-      setError("Failed to load polls. Please try again.");
+      setError("Failed to load polls. Please try again later.");
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch candidates for poll creation
-  const fetchCandidates = async () => {
-    try {
-      // This would need a new API endpoint to get all candidates
-      // For now, using dummy data
-      setCandidates([
-        { id: 1, name: "Candidate 1" },
-        { id: 2, name: "Candidate 2" },
-        { id: 3, name: "Candidate 3" },
-      ]);
-    } catch (err) {
-      console.error("Error fetching candidates:", err);
-    }
-  };
+  useEffect(() => {
+    fetchPolls();
+    // Poll for updates every minute
+    const intervalId = setInterval(fetchPolls, 60000);
+    return () => clearInterval(intervalId);
+  }, []);
 
-  // Handle form input changes
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setNewPoll({ ...newPoll, [name]: value });
-  };
-
-  // Handle candidate selection
-  const handleCandidateSelection = (e) => {
-    const selectedOptions = Array.from(e.target.selectedOptions, option => parseInt(option.value));
-    setNewPoll({ ...newPoll, candidates: selectedOptions });
-  };
-
-  // Create new poll
   const handleCreatePoll = async (e) => {
     e.preventDefault();
     
-    if (newPoll.candidates.length < 2) {
-      setError("Please select at least two candidates");
+    // Validate form
+    if (pollTitle.trim().length < 5) {
+      setError("Poll title must be at least 5 characters");
       return;
     }
     
+    if (!pollDescription.trim() || !pollQuestion.trim()) {
+      setError("Description and question are required");
+      return;
+    }
+    
+    // Filter out empty options
+    const filteredOptions = pollOptions.filter(opt => opt.trim() !== "");
+    if (filteredOptions.length < 2) {
+      setError("At least 2 options are required");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    
+    const pollData = {
+      title: pollTitle,
+      description: pollDescription,
+      question: pollQuestion,
+      options: filteredOptions
+    };
+    
+    console.log("==========================================");
+    console.log("Creating poll with data:", JSON.stringify(pollData, null, 2));
+    
     try {
-      setLoading(true);
-      await pollsAPI.createPoll(newPoll);
+      console.log("Calling Polls.create API endpoint");
+      const response = await Polls.create(pollData);
+      console.log("Poll created successfully, server response:", response);
+      setSuccess("Poll created successfully!");
       
-      // Reset form and fetch updated polls
-      setNewPoll({
-        title: "",
-        description: "",
-        startDate: "",
-        endDate: "",
-        candidates: []
-      });
+      // Reset form
+      setPollTitle("");
+      setPollDescription("");
+      setPollQuestion("");
+      setPollOptions(["", ""]);
       setShowCreateForm(false);
+      
+      // Refresh polls list
+      console.log("Refreshing polls list after creation");
       fetchPolls();
     } catch (err) {
       console.error("Error creating poll:", err);
-      setError(err.response?.data?.error || "Failed to create poll");
+      console.error("Error details:", {
+        message: err.message,
+        response: err.response,
+        data: err.response?.data,
+        status: err.response?.status
+      });
+      setError(err.response?.data?.error || err.message || "Failed to create poll. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
-  // End a poll
-  const handleEndPoll = async (pollId) => {
-    if (!window.confirm("Are you sure you want to end this poll?")) {
-      return;
+  const handleOptionChange = (index, value) => {
+    const newOptions = [...pollOptions];
+    newOptions[index] = value;
+    setPollOptions(newOptions);
+  };
+
+  const addOption = () => {
+    setPollOptions([...pollOptions, ""]);
+  };
+
+  const removeOption = (index) => {
+    if (pollOptions.length > 2) {
+      const newOptions = [...pollOptions];
+      newOptions.splice(index, 1);
+      setPollOptions(newOptions);
     }
-    
+  };
+
+  const endPoll = async (pollId) => {
     try {
-      setLoading(true);
-      await pollsAPI.endPoll(pollId);
+      await Polls.end(pollId);
+      setSuccess("Poll ended successfully");
       fetchPolls();
     } catch (err) {
-      console.error("Error ending poll:", err);
       setError("Failed to end poll");
-    } finally {
-      setLoading(false);
+      console.error(err);
     }
   };
 
-  // View poll results
-  const viewPollResults = async (pollId) => {
-    // This would navigate to a results page
-    console.log("View results for poll:", pollId);
+  // Renders the appropriate polls based on the active tab
+  const renderPolls = () => {
+    let polls = activeTab === "ongoing" ? ongoingPolls : pastPolls;
+    
+    if (loading && polls.length === 0) {
+      return <div className="loading">Loading polls...</div>;
+    }
+    
+    if (polls.length === 0) {
+      return <div>No {activeTab} polls found.</div>;
+    }
+    
+    return (
+      <div className="polls-list">
+        <h3>{activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Polls</h3>
+        {polls.map(poll => (
+          <div key={poll.id} className={`poll-item ${poll.status}`}>
+            <div className="poll-info">
+              <h4>{poll.title}</h4>
+              <p className="poll-description">{poll.description}</p>
+              <div className="poll-question">{poll.question}</div>
+              {poll.vote_count !== undefined && 
+                <div className="vote-count">{poll.vote_count} vote{poll.vote_count !== 1 ? "s" : ""}</div>
+              }
+            </div>
+            <div className="poll-actions">
+              {activeTab === "ongoing" && (
+                <button 
+                  className="end-poll-btn"
+                  onClick={() => endPoll(poll.id)}
+                >
+                  End Poll
+                </button>
+              )}
+              <button className="view-results-btn">
+                View Results
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
   };
 
   return (
     <div className="admin-dashboard">
-      <header className="dashboard-header">
+      <div className="dashboard-header">
         <h2>Admin Dashboard</h2>
         <div className="user-info">
-          <span>Welcome, {currentUser.name}</span>
-          <button onClick={logout} className="logout-btn">Logout</button>
+          <span>Welcome, {user?.name || "Admin"}</span>
+          <button className="logout-btn" onClick={logout}>
+            Logout
+          </button>
         </div>
-      </header>
+      </div>
 
-      {error && <div className="error-message">{error}</div>}
+      {error && (
+        <div className="error-message" onClick={() => setError(null)}>
+          {error}
+        </div>
+      )}
+      
+      {success && (
+        <div className="success-message" onClick={() => setSuccess(null)}>
+          {success}
+        </div>
+      )}
 
-      <div className="dashboard-actions">
+      <div className="admin-actions">
         <button 
-          onClick={() => setShowCreateForm(!showCreateForm)}
           className="create-poll-btn"
+          onClick={() => setShowCreateForm(!showCreateForm)}
         >
           {showCreateForm ? "Cancel" : "Create New Poll"}
         </button>
+        <button 
+          className="refresh-btn"
+          onClick={fetchPolls}
+        >
+          Refresh Polls
+        </button>
+      </div>
+      
+      <div className="poll-status">
+        {loading ? "Loading polls..." : 
+          `${ongoingPolls.length} ongoing poll(s), ${pastPolls.length} past poll(s)`}
       </div>
 
       {showCreateForm && (
@@ -147,119 +240,95 @@ const AdminDashboard = () => {
           <h3>Create New Poll</h3>
           <form onSubmit={handleCreatePoll}>
             <div className="form-group">
-              <label htmlFor="title">Poll Title</label>
+              <label htmlFor="pollTitle">Poll Title</label>
               <input
                 type="text"
-                id="title"
-                name="title"
-                value={newPoll.title}
-                onChange={handleInputChange}
+                id="pollTitle"
+                value={pollTitle}
+                onChange={(e) => setPollTitle(e.target.value)}
+                placeholder="Enter poll title (min 5 characters)"
                 required
-                minLength={5}
               />
             </div>
-
+            
             <div className="form-group">
-              <label htmlFor="description">Description</label>
+              <label htmlFor="pollDescription">Description</label>
               <textarea
-                id="description"
-                name="description"
-                value={newPoll.description}
-                onChange={handleInputChange}
+                id="pollDescription"
+                value={pollDescription}
+                onChange={(e) => setPollDescription(e.target.value)}
+                placeholder="Enter poll description"
                 required
               />
             </div>
-
+            
             <div className="form-group">
-              <label htmlFor="startDate">Start Date</label>
+              <label htmlFor="pollQuestion">Question</label>
               <input
-                type="datetime-local"
-                id="startDate"
-                name="startDate"
-                value={newPoll.startDate}
-                onChange={handleInputChange}
+                type="text"
+                id="pollQuestion"
+                value={pollQuestion}
+                onChange={(e) => setPollQuestion(e.target.value)}
+                placeholder="Enter the question for voters"
                 required
               />
             </div>
-
+            
             <div className="form-group">
-              <label htmlFor="endDate">End Date</label>
-              <input
-                type="datetime-local"
-                id="endDate"
-                name="endDate"
-                value={newPoll.endDate}
-                onChange={handleInputChange}
-                required
-              />
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="candidates">Select Candidates</label>
-              <select
-                multiple
-                id="candidates"
-                name="candidates"
-                value={newPoll.candidates}
-                onChange={handleCandidateSelection}
-                required
+              <label>Options (at least 2)</label>
+              {pollOptions.map((option, index) => (
+                <div key={index} className="option-input-group">
+                  <input
+                    type="text"
+                    value={option}
+                    onChange={(e) => handleOptionChange(index, e.target.value)}
+                    placeholder={`Option ${index + 1}`}
+                    required={index < 2}
+                  />
+                  {index >= 2 && (
+                    <button
+                      type="button"
+                      className="remove-option-btn"
+                      onClick={() => removeOption(index)}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                className="add-option-btn"
+                onClick={addOption}
               >
-                {candidates.map(candidate => (
-                  <option key={candidate.id} value={candidate.id}>
-                    {candidate.name}
-                  </option>
-                ))}
-              </select>
-              <small>Hold Ctrl (or Cmd on Mac) to select multiple candidates</small>
+                + Add Option
+              </button>
             </div>
-
-            <button type="submit" disabled={loading}>
+            
+            <button type="submit" className="submit-poll-btn" disabled={loading}>
               {loading ? "Creating..." : "Create Poll"}
             </button>
           </form>
         </div>
       )}
 
-      <div className="polls-list">
-        <h3>Ongoing Polls</h3>
+      <div className="polls-tabs">
+        <div className="tabs-header">
+          <button
+            className={activeTab === "ongoing" ? "active" : ""}
+            onClick={() => setActiveTab("ongoing")}
+          >
+            Ongoing Polls
+          </button>
+          <button
+            className={activeTab === "past" ? "active" : ""}
+            onClick={() => setActiveTab("past")}
+          >
+            Past Polls
+          </button>
+        </div>
         
-        {loading && <p>Loading polls...</p>}
-        
-        {!loading && polls.length === 0 && (
-          <p>No active polls found. Create one to get started.</p>
-        )}
-
-        {polls.map(poll => (
-          <div key={poll.id} className="poll-item">
-            <div className="poll-info">
-              <h4>{poll.title}</h4>
-              <p>{poll.description}</p>
-              <div className="poll-dates">
-                <span>Start: {new Date(poll.start_date).toLocaleString()}</span>
-                <span>End: {new Date(poll.end_date).toLocaleString()}</span>
-              </div>
-              <div className="vote-count">
-                <span>Votes: {poll.vote_count || 0}</span>
-              </div>
-            </div>
-            
-            <div className="poll-actions">
-              <button 
-                onClick={() => handleEndPoll(poll.id)}
-                className="end-poll-btn"
-                disabled={loading}
-              >
-                End Poll
-              </button>
-              <button 
-                onClick={() => viewPollResults(poll.id)}
-                className="view-results-btn"
-              >
-                View Results
-              </button>
-            </div>
-          </div>
-        ))}
+        {renderPolls()}
       </div>
     </div>
   );

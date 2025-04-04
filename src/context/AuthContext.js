@@ -1,123 +1,146 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { authAPI } from '../services/api';
+import { Auth } from '../services/api';
 
-// Create the auth context
-const AuthContext = createContext();
+// Create the context
+const AuthContext = createContext(null);
 
 // Custom hook to use the auth context
 export const useAuth = () => useContext(AuthContext);
 
-// Auth provider component
 export const AuthProvider = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState(null);
+  const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const navigate = useNavigate();
-
-  // Initialize auth state on page load
+  
+  // Check if user is already logged in on mount
   useEffect(() => {
-    const initAuth = () => {
+    const verifyStoredAuth = async () => {
       try {
-        const token = localStorage.getItem('token');
-        const user = localStorage.getItem('user');
+        const storedToken = localStorage.getItem('token');
+        const storedUser = localStorage.getItem('user');
         
-        if (token && user) {
-          setCurrentUser(JSON.parse(user));
+        if (storedToken && storedUser) {
+          // Verify token with the backend
+          const userData = await Auth.verifyToken();
+          
+          // Set user state if token is valid
+          setUser(userData);
+          setIsAuthenticated(true);
         }
       } catch (err) {
-        console.error('Auth initialization error:', err);
+        // Clear stored data if verification fails
         localStorage.removeItem('token');
         localStorage.removeItem('user');
       } finally {
         setLoading(false);
       }
     };
-
-    initAuth();
+    
+    verifyStoredAuth();
   }, []);
-
-  // Login function
+  
+  // Debug function to check token
+  const checkToken = () => {
+    const token = localStorage.getItem('token');
+    const user = JSON.parse(localStorage.getItem('user'));
+    console.log("AuthContext - Current token:", token ? "exists" : "missing");
+    console.log("AuthContext - Current user:", user);
+    return { token, user };
+  };
+  
+  // User login function
   const login = async (email, password) => {
-    setError('');
-    setLoading(true);
-    
     try {
-      const response = await authAPI.login(email, password);
-      
-      // Store token and user in localStorage
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
-      
-      // Update state
-      setCurrentUser(response.data.user);
-      
-      // Redirect based on role
-      const { role } = response.data.user;
-      if (role === 'admin') navigate('/admin');
-      else if (role === 'candidate') navigate('/candidate');
-      else if (role === 'voter') navigate('/voter');
-      
-      return response.data;
-    } catch (err) {
-      const errorMsg = err.response?.data?.error || 'Login failed';
-      setError(errorMsg);
-      throw new Error(errorMsg);
-    } finally {
-      setLoading(false);
+      const response = await Auth.login(email, password);
+      localStorage.setItem('token', response.token);
+      localStorage.setItem('user', JSON.stringify(response.user));
+      setUser(response.user);
+      setIsAuthenticated(true);
+      console.log("Login successful - token stored");
+      checkToken();
+      return response;
+    } catch (error) {
+      console.error("Login failed:", error);
+      throw error;
     }
   };
-
-  // Register function
+  
+  // User registration function
   const register = async (name, email, password, role) => {
-    setError('');
-    setLoading(true);
-    
-    try {
-      const response = await authAPI.register(name, email, password, role);
-      return response.data;
-    } catch (err) {
-      const errorMsg = err.response?.data?.error || 'Registration failed';
-      setError(errorMsg);
-      throw new Error(errorMsg);
-    } finally {
-      setLoading(false);
-    }
+    const response = await Auth.register(name, email, password, role);
+    return response;
   };
-
-  // Logout function
+  
+  // User logout function
   const logout = () => {
+    // Clear local storage
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    setCurrentUser(null);
-    navigate('/');
+    
+    // Reset state
+    setUser(null);
+    setIsAuthenticated(false);
   };
-
-  // Check if user is logged in
-  const isLoggedIn = () => {
-    return !!currentUser;
+  
+  // Update user data function (for profile updates)
+  const updateUser = (userData) => {
+    // Update local storage
+    localStorage.setItem('user', JSON.stringify({
+      ...user,
+      ...userData
+    }));
+    
+    // Update state
+    setUser({
+      ...user,
+      ...userData
+    });
   };
-
-  // Check if user has specific role
-  const hasRole = (role) => {
-    return currentUser && currentUser.role === role;
+  
+  // Also modify verifyToken to add logging
+  const verifyToken = async () => {
+    const token = localStorage.getItem('token');
+    console.log("Verifying token...", token ? "Token exists" : "No token found");
+    
+    if (!token) {
+      setIsAuthenticated(false);
+      setLoading(false);
+      return false;
+    }
+    
+    try {
+      const response = await Auth.verifyToken();
+      setUser(response.user);
+      setIsAuthenticated(true);
+      console.log("Token verified successfully - user:", response.user);
+      return true;
+    } catch (error) {
+      console.error("Token verification failed:", error);
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      setUser(null);
+      setIsAuthenticated(false);
+      return false;
+    } finally {
+      setLoading(false);
+    }
   };
-
-  // Context value
-  const value = {
-    currentUser,
+  
+  // Provide the auth context values
+  const contextValue = {
+    user,
+    isAuthenticated,
     loading,
-    error,
     login,
     register,
     logout,
-    isLoggedIn,
-    hasRole
+    updateUser,
+    checkToken
   };
-
+  
   return (
-    <AuthContext.Provider value={value}>
-      {!loading && children}
+    <AuthContext.Provider value={contextValue}>
+      {children}
     </AuthContext.Provider>
   );
 };

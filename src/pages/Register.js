@@ -115,7 +115,7 @@ const Register = () => {
               disabled={loading || success}
             >
               <option value="voter">Voter</option>
-              <option value="candidate">Candidate</option>
+              <option value="admin">Admin</option>
             </select>
           </div>
           

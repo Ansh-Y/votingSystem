@@ -8,8 +8,11 @@
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "server": "cd backend && npm run dev",
-    "dev": "concurrently \"npm run start\" \"npm run server\""
+    "server": "cd backend && node server.js",
+    "dev-server": "cd backend && npm run dev",
+    "dev": "concurrently \"npm run start\" \"npm run dev-server\"",
+    "setup-db": "cd backend && node setup_db.js",
+    "start-all": "echo \"Starting the voting system...\" && npm run setup-db && start cmd /k npm run server && start cmd /k npm run start"
   },
   "keywords": [
     "voting",

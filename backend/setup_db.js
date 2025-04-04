@@ -31,23 +31,23 @@ const setupDB = [
     id INT PRIMARY KEY AUTO_INCREMENT,
     title VARCHAR(255) NOT NULL,
     description TEXT,
+    question TEXT NOT NULL,
     start_date DATETIME NOT NULL,
-    end_date DATETIME NOT NULL,
-    status ENUM('pending', 'ongoing', 'ended') DEFAULT 'pending',
+    end_date DATETIME,
+    status ENUM('pending', 'ongoing', 'ended') DEFAULT 'ongoing',
     created_by INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (created_by) REFERENCES users(id)
   )`,
 
-  // Poll candidates table
-  `CREATE TABLE poll_candidates (
+  // Poll options table
+  `CREATE TABLE poll_options (
     id INT PRIMARY KEY AUTO_INCREMENT,
     poll_id INT NOT NULL,
-    candidate_id INT NOT NULL,
-    FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE,
-    FOREIGN KEY (candidate_id) REFERENCES users(id),
-    UNIQUE (poll_id, candidate_id)
+    option_text VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE
   )`,
 
   // Votes table
@@ -55,11 +55,11 @@ const setupDB = [
     id INT PRIMARY KEY AUTO_INCREMENT,
     poll_id INT NOT NULL,
     voter_id INT NOT NULL,
-    candidate_id INT NOT NULL,
+    option_id INT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE,
     FOREIGN KEY (voter_id) REFERENCES users(id),
-    FOREIGN KEY (candidate_id) REFERENCES users(id),
+    FOREIGN KEY (option_id) REFERENCES poll_options(id),
     UNIQUE (poll_id, voter_id)
   )`
 ];
@@ -101,7 +101,14 @@ connection.connect((err) => {
   function executeStatements(statements, index = 0) {
     if (index >= statements.length) {
       console.log('Database setup completed successfully!');
-      connection.end();
+      
+      // Execute test data after schema is created
+      if (statements === setupDB) {
+        console.log('Now inserting test data...');
+        executeStatements(testData, 0);
+      } else {
+        connection.end();
+      }
       return;
     }
 
@@ -119,12 +126,6 @@ connection.connect((err) => {
     });
   }
 
-  // Setup database schema first, then test data
+  // Setup database schema first
   executeStatements(setupDB, 0);
-  
-  // After database schema is set up, add test data
-  connection.on('end', () => {
-    console.log('Database setup completed!');
-    process.exit(0);
-  });
 }); 

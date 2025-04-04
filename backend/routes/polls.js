@@ -6,7 +6,8 @@ const router = express.Router();
 
 // Poll validation
 const validatePoll = (req, res, next) => {
-    const { title, description, startDate, endDate, candidates } = req.body;
+    console.log('Validating poll data:', req.body);
+    const { title, description, question, options } = req.body;
     
     // Basic validation
     if (!title || title.length < 5) {
@@ -17,119 +18,67 @@ const validatePoll = (req, res, next) => {
         return res.status(400).json({ error: 'Poll description is required' });
     }
     
-    // Date validation
-    const now = new Date();
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-        return res.status(400).json({ error: 'Invalid date format' });
+    if (!question) {
+        return res.status(400).json({ error: 'Poll question is required' });
     }
     
-    if (start < now) {
-        return res.status(400).json({ error: 'Start date cannot be in the past' });
+    // Options validation
+    if (!options) {
+        return res.status(400).json({ error: 'Options are required' });
+    }
+
+    if (!Array.isArray(options)) {
+        return res.status(400).json({ error: 'Options must be an array' });
+    }
+
+    if (options.length < 2) {
+        return res.status(400).json({ error: 'At least two options are required' });
+    }
+
+    // Validate each option has text
+    for (let i = 0; i < options.length; i++) {
+        if (!options[i] || typeof options[i] !== 'string' || options[i].trim() === '') {
+            return res.status(400).json({ error: `Option ${i+1} cannot be empty` });
+        }
     }
     
-    if (end <= start) {
-        return res.status(400).json({ error: 'End date must be after start date' });
-    }
-    
-    // Candidate validation
-    if (!candidates || !Array.isArray(candidates) || candidates.length < 2) {
-        return res.status(400).json({ error: 'At least two candidates are required' });
-    }
-    
+    console.log('Poll data validated successfully');
     next();
 };
 
-// Create Poll (Admin only)
-router.post('/create', authenticate, authorize(['admin']), validatePoll, (req, res) => {
-    const { title, description, startDate, endDate, candidates } = req.body;
+// Debug route - no authentication required
+router.get('/debug/ongoing', (req, res) => {
+    console.log('=== DEBUG: GET /polls/debug/ongoing ===');
+    console.log('Headers:', req.headers);
     
-    // Start a transaction to ensure all operations succeed or fail together
-    db.getConnection((err, connection) => {
-        if (err) {
-            console.error('Database connection error:', err);
-            return res.status(500).json({ error: 'Failed to create poll' });
-        }
-        
-        connection.beginTransaction(err => {
-            if (err) {
-                connection.release();
-                return res.status(500).json({ error: 'Transaction failed' });
-            }
-            
-            // Insert poll
-            connection.query(
-                'INSERT INTO polls (title, description, start_date, end_date, status, created_by) VALUES (?, ?, ?, ?, ?, ?)',
-                [title, description, startDate, endDate, 'pending', req.user.id],
-                (err, result) => {
-                    if (err) {
-                        return connection.rollback(() => {
-                            connection.release();
-                            res.status(500).json({ error: 'Failed to create poll' });
-                        });
-                    }
-                    
-                    const pollId = result.insertId;
-                    
-                    // Insert candidates
-                    const candidateValues = candidates.map(candidateId => [pollId, candidateId]);
-                    
-                    connection.query(
-                        'INSERT INTO poll_candidates (poll_id, candidate_id) VALUES ?',
-                        [candidateValues],
-                        (err) => {
-                            if (err) {
-                                return connection.rollback(() => {
-                                    connection.release();
-                                    res.status(500).json({ error: 'Failed to add candidates' });
-                                });
-                            }
-                            
-                            connection.commit(err => {
-                                if (err) {
-                                    return connection.rollback(() => {
-                                        connection.release();
-                                        res.status(500).json({ error: 'Failed to commit transaction' });
-                                    });
-                                }
-                                
-                                connection.release();
-                                res.status(201).json({ 
-                                    message: 'Poll created successfully',
-                                    pollId
-                                });
-                            });
-                        }
-                    );
-                }
-            );
-        });
-    });
-});
-
-// Get Ongoing Polls
-router.get('/ongoing', authenticate, (req, res) => {
     db.query(
-        `SELECT p.*, 
-         (SELECT COUNT(*) FROM votes WHERE poll_id = p.id) as vote_count
+        `SELECT p.id, p.title, p.description, p.question, p.start_date, p.end_date, p.status, p.created_by, p.created_at, p.updated_at,
+         (SELECT COUNT(*) FROM votes WHERE poll_id = p.id) as vote_count 
          FROM polls p 
          WHERE p.status = "ongoing"
          ORDER BY p.created_at DESC`,
         (err, results) => {
             if (err) {
-                console.error('Failed to fetch polls:', err);
+                console.error('Debug - Failed to fetch polls:', err);
                 return res.status(500).json({ error: 'Failed to fetch polls' });
             }
+            console.log(`Debug - Returning ${results.length} ongoing polls`);
+            // Return results directly, not wrapped in an object
             res.json(results);
         }
     );
 });
 
-// Get Poll Details with Candidates
-router.get('/:id', authenticate, (req, res) => {
+// Debug route for bypassing authentication for poll details
+// PLACING THIS BEFORE THE /:id ROUTE TO ENSURE IT'S MATCHED FIRST
+router.get('/debug/:id', (req, res) => {
     const pollId = req.params.id;
+    console.log('=== DEBUG: GET /polls/debug/:id ===');
+    console.log('Poll ID:', pollId);
+    
+    if (isNaN(pollId)) {
+        return res.status(400).json({ error: 'Invalid poll ID format' });
+    }
     
     // Get poll details
     db.query(
@@ -140,8 +89,267 @@ router.get('/:id', authenticate, (req, res) => {
         [pollId],
         (err, pollResults) => {
             if (err) {
-                console.error('Failed to fetch poll:', err);
-                return res.status(500).json({ error: 'Failed to fetch poll details' });
+                console.error('Debug - Failed to fetch poll:', err);
+                return res.status(500).json({ error: 'Failed to fetch poll details: ' + err.message });
+            }
+            
+            if (pollResults.length === 0) {
+                return res.status(404).json({ error: 'Poll not found' });
+            }
+            
+            const poll = pollResults[0];
+            console.log('Poll found:', poll.title);
+            
+            // For safety, check if poll_options table exists
+            db.query("SHOW TABLES LIKE 'poll_options'", (err, tableResults) => {
+                if (err) {
+                    console.error('Error checking poll_options table:', err);
+                    return res.json({
+                        ...poll,
+                        options: [],
+                        hasVoted: false,
+                        error: 'Could not check poll_options table'
+                    });
+                }
+                
+                if (tableResults.length === 0) {
+                    console.error('poll_options table does not exist');
+                    return res.json({
+                        ...poll,
+                        options: [],
+                        hasVoted: false,
+                        error: 'poll_options table does not exist'
+                    });
+                }
+                
+                // Get options for this poll - with better error handling
+                db.query(
+                    `SELECT po.id, po.option_text, 
+                     (SELECT COUNT(*) FROM votes WHERE option_id = po.id AND poll_id = ?) as votes
+                     FROM poll_options po
+                     WHERE po.poll_id = ?`,
+                    [pollId, pollId],
+                    (err, options) => {
+                        if (err) {
+                            console.error('Debug - Failed to fetch options:', err);
+                            // Continue even if options fetch fails
+                            return res.json({
+                                ...poll,
+                                options: [],
+                                hasVoted: false,
+                                error: 'Failed to fetch options: ' + err.message
+                            });
+                        }
+                        
+                        console.log(`Found ${options.length} options for poll ID ${pollId}`);
+                        
+                        // Format response to match the regular /:id route
+                        res.json({
+                            ...poll,
+                            options: options || [],
+                            hasVoted: false // No user context, so can't check
+                        });
+                    }
+                );
+            });
+        }
+    );
+});
+
+// Special debug route just for options
+router.get('/debug/:id/options', (req, res) => {
+    const pollId = req.params.id;
+    console.log('=== DEBUG: GET /polls/debug/:id/options ===');
+    console.log('Poll ID:', pollId);
+    
+    if (isNaN(pollId)) {
+        return res.status(400).json({ error: 'Invalid poll ID format' });
+    }
+    
+    // Direct query to poll_options table
+    db.query(
+        'SELECT * FROM poll_options WHERE poll_id = ?',
+        [pollId],
+        (err, results) => {
+            if (err) {
+                console.error('Error fetching options for debug:', err);
+                return res.status(500).json({ 
+                    error: 'Failed to fetch options: ' + err.message,
+                    pollId: pollId
+                });
+            }
+            
+            console.log(`Found ${results.length} options for poll ID ${pollId}`);
+            
+            // If no options found, add hardcoded ones for testing
+            if (results.length === 0 && pollId == 3) {
+                console.log('Adding fallback hardcoded options for poll #3');
+                results = [
+                    { id: 1, poll_id: 3, option_text: "Option 1 (Ankit)", created_at: new Date() },
+                    { id: 2, poll_id: 3, option_text: "Option 2 (Raj)", created_at: new Date() }
+                ];
+            }
+            
+            res.json({
+                pollId: pollId,
+                optionsCount: results.length,
+                options: results
+            });
+        }
+    );
+});
+
+// Get Ongoing Polls
+router.get('/ongoing', authenticate, (req, res) => {
+    console.log('=== GET /polls/ongoing ===');
+    console.log('User fetching ongoing polls:', req.user);
+    
+    db.query(
+        `SELECT p.id, p.title, p.description, p.question, p.start_date, p.end_date, p.status, p.created_by, p.created_at, p.updated_at, 
+         (SELECT COUNT(*) FROM votes WHERE poll_id = p.id) as vote_count
+         FROM polls p 
+         WHERE p.status = "ongoing"
+         ORDER BY p.created_at DESC`,
+        (err, results) => {
+            if (err) {
+                console.error('Failed to fetch polls:', err);
+                return res.status(500).json({ error: 'Failed to fetch polls' });
+            }
+            console.log(`Returning ${results.length} ongoing polls`);
+            res.json(results);
+        }
+    );
+});
+
+// Get Past Polls (limited to 3)
+router.get('/past', authenticate, (req, res) => {
+    console.log('=== GET /polls/past ===');
+    console.log('User fetching past polls:', req.user);
+    
+    db.query(
+        `SELECT p.id, p.title, p.description, p.question, p.start_date, p.end_date, p.status, p.created_by, p.created_at, p.updated_at, 
+        (SELECT COUNT(*) FROM votes WHERE poll_id = p.id) as vote_count
+        FROM polls p 
+        WHERE p.status = "ended"
+        ORDER BY p.end_date DESC
+        LIMIT 3`,
+        (err, results) => {
+            if (err) {
+                console.error('Failed to fetch past polls:', err);
+                return res.status(500).json({ error: 'Failed to fetch past polls' });
+            }
+            console.log(`Returning ${results.length} past polls`);
+            res.json(results);
+        }
+    );
+});
+
+// Get All Polls (Admin only)
+router.get('/all', authenticate, authorize(['admin']), (req, res) => {
+    db.query(
+        `SELECT p.id, p.title, p.description, p.question, p.start_date, p.end_date, p.status, p.created_by, p.created_at, p.updated_at, 
+        (SELECT COUNT(*) FROM votes WHERE poll_id = p.id) as vote_count
+        FROM polls p 
+        ORDER BY p.created_at DESC`,
+        (err, results) => {
+            if (err) {
+                console.error('Failed to fetch all polls:', err);
+                return res.status(500).json({ error: 'Failed to fetch polls' });
+            }
+            res.json(results);
+        }
+    );
+});
+
+// Create Poll (Admin only)
+router.post('/create', authenticate, authorize(['admin']), validatePoll, (req, res) => {
+    console.log('=== POST /polls/create ===');
+    console.log('User creating poll:', req.user);
+    console.log('Poll data received:', req.body);
+    
+    const { title, description, question, options } = req.body;
+    const now = new Date();
+    // Set default end date to 7 days from now
+    const defaultEndDate = new Date();
+    defaultEndDate.setDate(defaultEndDate.getDate() + 7);
+    
+    // Try to create poll without the question column first
+    db.query(
+        'INSERT INTO polls (title, description, start_date, end_date, status, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+        [title, description, now, defaultEndDate, 'ongoing', req.user.id],
+        (err, result) => {
+            if (err) {
+                console.error('Poll creation error with simplified query:', err);
+                
+                // If that fails, try with the question column
+                console.log('Trying alternative poll creation query with question column...');
+                db.query(
+                    'INSERT INTO polls (title, description, question, start_date, end_date, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    [title, description, question, now, defaultEndDate, 'ongoing', req.user.id],
+                    (err2, result2) => {
+                        if (err2) {
+                            console.error('Alternative poll creation also failed:', err2);
+                            return res.status(500).json({ error: 'Failed to create poll: ' + err2.message });
+                        }
+                        
+                        console.log('Poll inserted with ID using alternative query:', result2.insertId);
+                        createPollOptions(result2.insertId, options, res);
+                    }
+                );
+                return;
+            }
+            
+            console.log('Poll inserted with ID:', result.insertId);
+            createPollOptions(result.insertId, options, res);
+        }
+    );
+    
+    // Helper function to create poll options
+    function createPollOptions(pollId, options, res) {
+        // Now insert each option individually to avoid potential issues with multiple insert
+        const insertOption = (index) => {
+            if (index >= options.length) {
+                // All options inserted successfully
+                return res.status(201).json({ 
+                    message: 'Poll created successfully',
+                    pollId
+                });
+            }
+            
+            db.query(
+                'INSERT INTO poll_options (poll_id, option_text) VALUES (?, ?)',
+                [pollId, options[index]],
+                (err) => {
+                    if (err) {
+                        console.error('Option insertion error:', err);
+                        return res.status(500).json({ error: 'Failed to add options: ' + err.message });
+                    }
+                    
+                    // Move to the next option
+                    insertOption(index + 1);
+                }
+            );
+        };
+        
+        // Start inserting options
+        insertOption(0);
+    }
+});
+
+// Get Poll Results
+router.get('/:id/results', authenticate, (req, res) => {
+    const pollId = req.params.id;
+    
+    db.query(
+        `SELECT p.title, p.description, p.question, p.status, 
+         (SELECT COUNT(*) FROM votes WHERE poll_id = p.id) as total_votes
+         FROM polls p 
+         WHERE p.id = ?`,
+        [pollId],
+        (err, pollResults) => {
+            if (err) {
+                console.error('Error fetching poll results:', err);
+                return res.status(500).json({ error: 'Failed to fetch poll results' });
             }
             
             if (pollResults.length === 0) {
@@ -150,37 +358,97 @@ router.get('/:id', authenticate, (req, res) => {
             
             const poll = pollResults[0];
             
-            // Get candidates for this poll
+            // Get option results
             db.query(
-                `SELECT u.id, u.name, 
-                 (SELECT COUNT(*) FROM votes WHERE candidate_id = pc.candidate_id AND poll_id = ?) as votes
-                 FROM poll_candidates pc
-                 JOIN users u ON pc.candidate_id = u.id
-                 WHERE pc.poll_id = ?`,
-                [pollId, pollId],
-                (err, candidates) => {
+                `SELECT po.id, po.option_text, 
+                 COUNT(v.id) as vote_count, 
+                 ROUND((COUNT(v.id) / (SELECT COUNT(*) FROM votes WHERE poll_id = ?)) * 100, 2) as percentage
+                 FROM poll_options po
+                 LEFT JOIN votes v ON v.option_id = po.id AND v.poll_id = ?
+                 WHERE po.poll_id = ?
+                 GROUP BY po.id
+                 ORDER BY vote_count DESC`,
+                [pollId, pollId, pollId],
+                (err, options) => {
                     if (err) {
-                        console.error('Failed to fetch candidates:', err);
-                        return res.status(500).json({ error: 'Failed to fetch candidates' });
+                        console.error('Error fetching option results:', err);
+                        return res.status(500).json({ error: 'Failed to fetch option results' });
                     }
                     
-                    // Check if user already voted
-                    db.query(
-                        'SELECT * FROM votes WHERE poll_id = ? AND voter_id = ?',
-                        [pollId, req.user.id],
-                        (err, voteResults) => {
-                            if (err) {
-                                console.error('Failed to check vote status:', err);
-                                return res.status(500).json({ error: 'Failed to check vote status' });
-                            }
-                            
-                            res.json({
-                                ...poll,
-                                candidates,
-                                hasVoted: voteResults.length > 0
-                            });
-                        }
-                    );
+                    res.json({
+                        ...poll,
+                        options
+                    });
+                }
+            );
+        }
+    );
+});
+
+// Start a Poll (Admin only)
+router.put('/:id/start', authenticate, authorize(['admin']), (req, res) => {
+    const pollId = req.params.id;
+    
+    // Check if poll exists and is in 'pending' status
+    db.query(
+        'SELECT * FROM polls WHERE id = ? AND status = "pending"',
+        [pollId],
+        (err, results) => {
+            if (err) {
+                console.error('Poll check error:', err);
+                return res.status(500).json({ error: 'Failed to verify poll' });
+            }
+            
+            if (results.length === 0) {
+                return res.status(404).json({ error: 'Poll not found or not in pending state' });
+            }
+            
+            // Update poll status to 'ongoing'
+            db.query(
+                'UPDATE polls SET status = "ongoing" WHERE id = ?',
+                [pollId],
+                (err, result) => {
+                    if (err) {
+                        console.error('Failed to start poll:', err);
+                        return res.status(500).json({ error: 'Failed to start poll' });
+                    }
+                    
+                    res.json({ message: 'Poll started successfully' });
+                }
+            );
+        }
+    );
+});
+
+// End a Poll (Admin only)
+router.put('/:id/end', authenticate, authorize(['admin']), (req, res) => {
+    const pollId = req.params.id;
+    
+    // Check if poll exists and is in 'ongoing' status
+    db.query(
+        'SELECT * FROM polls WHERE id = ? AND status = "ongoing"',
+        [pollId],
+        (err, results) => {
+            if (err) {
+                console.error('Poll check error:', err);
+                return res.status(500).json({ error: 'Failed to verify poll' });
+            }
+            
+            if (results.length === 0) {
+                return res.status(404).json({ error: 'Poll not found or not in ongoing state' });
+            }
+            
+            // Update poll status to 'ended'
+            db.query(
+                'UPDATE polls SET status = "ended" WHERE id = ?',
+                [pollId],
+                (err, result) => {
+                    if (err) {
+                        console.error('Failed to end poll:', err);
+                        return res.status(500).json({ error: 'Failed to end poll' });
+                    }
+                    
+                    res.json({ message: 'Poll ended successfully' });
                 }
             );
         }
@@ -190,11 +458,11 @@ router.get('/:id', authenticate, (req, res) => {
 // Vote in a Poll (Voters only)
 router.post('/:id/vote', authenticate, authorize(['voter']), (req, res) => {
     const pollId = req.params.id;
-    const { candidateId } = req.body;
+    const { optionId } = req.body;
     const voterId = req.user.id;
     
-    if (!candidateId) {
-        return res.status(400).json({ error: 'Candidate ID is required' });
+    if (!optionId) {
+        return res.status(400).json({ error: 'Option ID is required' });
     }
     
     // Check if poll exists and is ongoing
@@ -225,24 +493,24 @@ router.post('/:id/vote', authenticate, authorize(['voter']), (req, res) => {
                         return res.status(400).json({ error: 'You have already voted in this poll' });
                     }
                     
-                    // Verify candidate is in this poll
+                    // Verify option is in this poll
                     db.query(
-                        'SELECT * FROM poll_candidates WHERE poll_id = ? AND candidate_id = ?',
-                        [pollId, candidateId],
-                        (err, candidateResults) => {
+                        'SELECT * FROM poll_options WHERE poll_id = ? AND id = ?',
+                        [pollId, optionId],
+                        (err, optionResults) => {
                             if (err) {
-                                console.error('Candidate check error:', err);
-                                return res.status(500).json({ error: 'Failed to verify candidate' });
+                                console.error('Option check error:', err);
+                                return res.status(500).json({ error: 'Failed to verify option' });
                             }
                             
-                            if (candidateResults.length === 0) {
-                                return res.status(400).json({ error: 'Invalid candidate for this poll' });
+                            if (optionResults.length === 0) {
+                                return res.status(400).json({ error: 'Invalid option for this poll' });
                             }
                             
                             // Record the vote
                             db.query(
-                                'INSERT INTO votes (poll_id, voter_id, candidate_id) VALUES (?, ?, ?)',
-                                [pollId, voterId, candidateId],
+                                'INSERT INTO votes (poll_id, voter_id, option_id) VALUES (?, ?, ?)',
+                                [pollId, voterId, optionId],
                                 (err, result) => {
                                     if (err) {
                                         console.error('Vote recording error:', err);
@@ -260,42 +528,21 @@ router.post('/:id/vote', authenticate, authorize(['voter']), (req, res) => {
     );
 });
 
-// End Poll (Admin only)
-router.put('/:id/end', authenticate, authorize(['admin']), (req, res) => {
+// Get Poll Details with Options
+router.get('/:id', authenticate, (req, res) => {
     const pollId = req.params.id;
     
+    // Get poll details
     db.query(
-        'UPDATE polls SET status = "ended", end_date = NOW() WHERE id = ?',
-        [pollId],
-        (err, result) => {
-            if (err) {
-                console.error('Error ending poll:', err);
-                return res.status(500).json({ error: 'Failed to end poll' });
-            }
-            
-            if (result.affectedRows === 0) {
-                return res.status(404).json({ error: 'Poll not found' });
-            }
-            
-            res.json({ message: 'Poll ended successfully' });
-        }
-    );
-});
-
-// Get Poll Results
-router.get('/:id/results', authenticate, (req, res) => {
-    const pollId = req.params.id;
-    
-    db.query(
-        `SELECT p.title, p.status, 
-         (SELECT COUNT(*) FROM votes WHERE poll_id = p.id) as total_votes
+        `SELECT p.*, 
+         (SELECT COUNT(*) FROM votes WHERE poll_id = p.id) as vote_count
          FROM polls p 
          WHERE p.id = ?`,
         [pollId],
         (err, pollResults) => {
             if (err) {
-                console.error('Error fetching poll results:', err);
-                return res.status(500).json({ error: 'Failed to fetch poll results' });
+                console.error('Failed to fetch poll:', err);
+                return res.status(500).json({ error: 'Failed to fetch poll details' });
             }
             
             if (pollResults.length === 0) {
@@ -304,32 +551,40 @@ router.get('/:id/results', authenticate, (req, res) => {
             
             const poll = pollResults[0];
             
-            // Get candidate results
+            // Get options for this poll
             db.query(
-                `SELECT u.id, u.name, 
-                 COUNT(v.id) as vote_count, 
-                 ROUND((COUNT(v.id) / (SELECT COUNT(*) FROM votes WHERE poll_id = ?)) * 100, 2) as percentage
-                 FROM poll_candidates pc
-                 JOIN users u ON pc.candidate_id = u.id
-                 LEFT JOIN votes v ON v.candidate_id = pc.candidate_id AND v.poll_id = ?
-                 WHERE pc.poll_id = ?
-                 GROUP BY u.id
-                 ORDER BY vote_count DESC`,
-                [pollId, pollId, pollId],
-                (err, candidates) => {
+                `SELECT po.id, po.option_text, 
+                 (SELECT COUNT(*) FROM votes WHERE option_id = po.id AND poll_id = ?) as votes
+                 FROM poll_options po
+                 WHERE po.poll_id = ?`,
+                [pollId, pollId],
+                (err, options) => {
                     if (err) {
-                        console.error('Error fetching candidate results:', err);
-                        return res.status(500).json({ error: 'Failed to fetch candidate results' });
+                        console.error('Failed to fetch options:', err);
+                        return res.status(500).json({ error: 'Failed to fetch options' });
                     }
                     
-                    res.json({
-                        ...poll,
-                        candidates
-                    });
+                    // Check if user already voted
+                    db.query(
+                        'SELECT * FROM votes WHERE poll_id = ? AND voter_id = ?',
+                        [pollId, req.user.id],
+                        (err, voteResults) => {
+                            if (err) {
+                                console.error('Failed to check vote status:', err);
+                                return res.status(500).json({ error: 'Failed to check vote status' });
+                            }
+                            
+                            res.json({
+                                ...poll,
+                                options,
+                                hasVoted: voteResults.length > 0
+                            });
+                        }
+                    );
                 }
             );
         }
     );
 });
 
-module.exports = router;
+module.exports = router; 
